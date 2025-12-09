@@ -44,8 +44,7 @@ stack_degradation = st.sidebar.number_input(
 # 1-2. 경제성 입력
 st.sidebar.subheader("경제성")
 
-# 수소설비 500 kW 기준
-# 공사비 195백만원, 설비비용 2,400백만원 → 용량 비례로 기본값 설정
+# 수소설비 500 kW 기준 비례값
 capex_construction = st.sidebar.number_input(
     "CAPEX-공사비 (원)",
     min_value=0.0,
@@ -171,7 +170,7 @@ try:
 except Exception:
     p_irr_pct = np.nan
 
-# LCOH 계산 (NREL H2A 모델 방식)
+# LCOH 계산
 depreciation_amount = capex_total / operation_years if operation_years > 0 else 0.0
 numerator_sum_after_tax = capex_total
 denominator_sum = 0.0
@@ -464,3 +463,4 @@ with col_fin:
     fig_pay.update_xaxes(tickfont=dict(size=16))
     fig_pay.update_yaxes(tickfont=dict(size=16))
     st.plotly_chart(fig_pay, use_container_width=True)
+
