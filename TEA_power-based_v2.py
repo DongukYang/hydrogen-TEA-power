@@ -44,7 +44,8 @@ stack_degradation = st.sidebar.number_input(
 # 1-2. 경제성 입력
 st.sidebar.subheader("경제성")
 
-# 수소설비 500 kW 기준 비례값
+# 수소설비 500 kW 기준
+# 공사비 195백만원, 설비비용 2,400백만원 → 용량 비례로 기본값 설정
 capex_construction = st.sidebar.number_input(
     "CAPEX-공사비 (원)",
     min_value=0.0,
@@ -240,17 +241,64 @@ def compute_lcoh_given_params(capex_total_val, specific_energy_val, elec_price_v
 # --- LCOH 구성요소 데이터 (원/kgH2 단위) ---
 labels = ["CAPEX-공사", "CAPEX-설비", "OPEX-O&M", "OPEX-전력", "Total LCOH"]
 
-capex_construction_per_kg = (capex_construction * (r_real if r_real != 0 else 0) / (1 - (1 + r_real) ** (-operation_years)) ) / annual_h2_kg if annual_h2_kg > 0 and r_real != 0 else (capex_construction / max(operation_years, 1) ) / annual_h2_kg if annual_h2_kg > 0 else 0.0
-capex_equipment_per_kg = (capex_equipment * (r_real if r_real != 0 else 0) / (1 - (1 + r_real) ** (-operation_years)) ) / annual_h2_kg if annual_h2_kg > 0 and r_real != 0 else (capex_equipment / max(operation_years, 1) ) / annual_h2_kg if annual_h2_kg > 0 else 0.0
-opex_per_kg = opex_annual / annual_h2_kg if annual_h2_kg > 0 else 0.0
-elec_per_kg = annual_elec_cost / annual_h2_kg if annual_h2_kg > 0 else 0.0
-capital_per_kg = 0.0  # (필요시 사용)
+# 초기값
+numerator_construction = capex_construction   
+numerator_equipment   = capex_equipment       
+numerator_opex        = 0.0                  
+numerator_elec        = 0.0                  
+numerator_byprod      = 0.0                  
+
+# 할인된 비용/수익
+hours_since_last_replacement_val = 0.0
+years_since_last_replacement_val = 0
+for t in range(1, int(operation_years) + 1):
+    # 스택교체
+    opex_stack_t = 0.0
+    if stack_replacement_hours > 0 and hours_since_last_replacement_val >= stack_replacement_hours:
+        opex_stack_t = opex_annual * 0.3  # 스택교체비용 OPEX의 30% 가정
+        hours_since_last_replacement_val = 0.0
+        years_since_last_replacement_val = 0
+
+    # 스택 효율
+    deg_multiplier = (1 - stack_deg_rate) ** years_since_last_replacement_val if stack_deg_rate > 0 else 1.0
+
+    # 수소생산량, 전력사용량
+    h2_t = annual_h2_kg * deg_multiplier
+    elec_kwh_t = annual_elec_kwh * deg_multiplier
+
+    # 연간 비용 수익
+    elec_cost_t = elec_kwh_t * elec_price               # 전력비용
+    opex_cost_t = opex_annual + opex_stack_t            # O&M cost (fixed OPEX + 교체비용)
+    o2_rev_t   = h2_t * 8.0 * o2_price                  # 산소 판매수익 (8 kg O₂ per 1 kg H₂)
+    heat_rev_t = h2_t * heat_mwh_per_kg * heat_price    # 열 판매수익
+
+    # 할인율
+    discount_factor = 1 / ((1 + r_real) ** t) if r_real != -1 else 1.0 
+
+    # Accumulate present value of each component (after-tax)
+    numerator_elec += elec_cost_t * (1 - tax_rate) * discount_factor        # 세후 전력비
+    numerator_opex += opex_cost_t * (1 - tax_rate) * discount_factor        # 세후 O&M
+    numerator_byprod += - (o2_rev_t + heat_rev_t) * (1 - tax_rate) * discount_factor  # 수익
+
+    numerator_construction += tax_rate * (depreciation_amount * (capex_construction / capex_total)) * discount_factor
+    numerator_equipment   += tax_rate * (depreciation_amount * (capex_equipment   / capex_total)) * discount_factor
+
+    hours_since_last_replacement_val += annual_operating_hours
+    years_since_last_replacement_val += 1
+
+capex_construction_per_kg = numerator_construction / denominator_sum / (1 - tax_rate) if denominator_sum > 0 else 0.0
+capex_equipment_per_kg   = numerator_equipment   / denominator_sum / (1 - tax_rate) if denominator_sum > 0 else 0.0
+opex_per_kg              = (numerator_opex + numerator_byprod) / denominator_sum / (1 - tax_rate) if denominator_sum > 0 else 0.0
+elec_per_kg              = numerator_elec        / denominator_sum / (1 - tax_rate) if denominator_sum > 0 else 0.0
+
+# total LCOH
+total_lcoh_calc = capex_construction_per_kg + capex_equipment_per_kg + opex_per_kg + elec_per_kg
 
 # 👉 파이차트/비용비율 산출용 (Total LCOH 제외)
 drivers = ["CAPEX-공사", "CAPEX-설비", "OPEX-O&M", "OPEX-전력"]
-values = [capex_construction_per_kg, capex_equipment_per_kg, opex_per_kg, elec_per_kg]
+values  = [capex_construction_per_kg, capex_equipment_per_kg, opex_per_kg, elec_per_kg]
 
-# ✅ 비용 항목별 색상
+# 색상
 colors = {
     "CAPEX-공사": "#1f77b4",
     "CAPEX-설비": "#aec7e8",
@@ -258,23 +306,21 @@ colors = {
     "OPEX-전력": "#ff9896",
 }
 
-# 각 구성요소를 Total 막대에 합산하기 위한 배열
+# Bar Chart
 y_capex_constr = [capex_construction_per_kg, 0, 0, 0, capex_construction_per_kg]
-y_capex_equip = [0, capex_equipment_per_kg, 0, 0, capex_equipment_per_kg]
-y_opex = [0, 0, opex_per_kg, 0, opex_per_kg]
-y_elec = [0, 0, 0, elec_per_kg, elec_per_kg]
-y_capital = [0, 0, 0, 0, capital_per_kg]
+y_capex_equip  = [0, capex_equipment_per_kg, 0, 0, capex_equipment_per_kg]
+y_opex         = [0, 0, opex_per_kg, 0, opex_per_kg]
+y_elec         = [0, 0, 0, elec_per_kg, elec_per_kg]
 
 fig_bar = go.Figure()
 fig_bar.add_bar(name="CAPEX-공사", x=labels, y=y_capex_constr,
-               text=[f"{v:,.0f}" if v > 0 else "" for v in y_capex_constr], textposition="auto")
+               text=[f"{v:,.0f}" if v > 0 else "" for v in y_capex_constr], textposition="auto", marker_color=colors["CAPEX-공사"])
 fig_bar.add_bar(name="CAPEX-설비", x=labels, y=y_capex_equip,
-               text=[f"{v:,.0f}" if v > 0 else "" for v in y_capex_equip], textposition="auto")
+               text=[f"{v:,.0f}" if v > 0 else "" for v in y_capex_equip], textposition="auto", marker_color=colors["CAPEX-설비"])
 fig_bar.add_bar(name="OPEX-O&M", x=labels, y=y_opex,
-               text=[f"{v:,.0f}" if v > 0 else "" for v in y_opex], textposition="auto")
+               text=[f"{v:,.0f}" if v > 0 else "" for v in y_opex], textposition="auto", marker_color=colors["OPEX-O&M"])
 fig_bar.add_bar(name="OPEX-전력", x=labels, y=y_elec,
-               text=[f"{v:,.0f}" if v > 0 else "" for v in y_elec], textposition="auto")
-# fig_bar.add_bar(name="자본비용", ... )  # 필요 시 사용
+               text=[f"{v:,.0f}" if v > 0 else "" for v in y_elec], textposition="auto", marker_color=colors["OPEX-전력"])
 
 fig_bar.update_layout(barmode="stack", yaxis_title="원/kgH₂", xaxis_title="비용 항목")
 
@@ -463,4 +509,3 @@ with col_fin:
     fig_pay.update_xaxes(tickfont=dict(size=16))
     fig_pay.update_yaxes(tickfont=dict(size=16))
     st.plotly_chart(fig_pay, use_container_width=True)
-
