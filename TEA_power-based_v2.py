@@ -45,7 +45,6 @@ stack_degradation = st.sidebar.number_input(
 st.sidebar.subheader("경제성")
 
 # 수소설비 500 kW 기준
-# 공사비 195백만원, 설비비용 2,400백만원 → 용량 비례로 기본값 설정
 capex_construction = st.sidebar.number_input(
     "CAPEX-공사비 (원)",
     min_value=0.0,
@@ -294,7 +293,7 @@ elec_per_kg              = numerator_elec        / denominator_sum / (1 - tax_ra
 # total LCOH
 total_lcoh_calc = capex_construction_per_kg + capex_equipment_per_kg + opex_per_kg + elec_per_kg
 
-# 👉 파이차트/비용비율 산출용 (Total LCOH 제외)
+# 파이차트/비용비율 산출용 (Total LCOH 제외)
 drivers = ["CAPEX-공사", "CAPEX-설비", "OPEX-O&M", "OPEX-전력"]
 values  = [capex_construction_per_kg, capex_equipment_per_kg, opex_per_kg, elec_per_kg]
 
@@ -509,3 +508,4 @@ with col_fin:
     fig_pay.update_xaxes(tickfont=dict(size=16))
     fig_pay.update_yaxes(tickfont=dict(size=16))
     st.plotly_chart(fig_pay, use_container_width=True)
+
